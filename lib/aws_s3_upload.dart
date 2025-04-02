@@ -12,6 +12,14 @@ import 'package:recase/recase.dart';
 
 import './src/policy.dart';
 
+enum Domain {
+  amazonaws,
+  digitaloceanspaces;
+
+  static Domain fromStr(String str) =>
+      values.firstWhere((t) => t.name.contains(str));
+}
+
 /// Convenience class for uploading files to AWS S3
 class AwsS3 {
   /// Upload a file, returning the file's public URL on success.
@@ -52,12 +60,14 @@ class AwsS3 {
 
     /// Additional metadata to be attached to the upload
     Map<String, String>? metadata,
+
+    /// The domain to use for the endpoint. Defaults to `amazonaws`.
+    String? domain,
   }) async {
-    var httpStr = 'http';
-    if (useSSL) {
-      httpStr += 's';
-    }
-    final endpoint = '$httpStr://$bucket.s3.$region.amazonaws.com';
+    domain ??= Domain.amazonaws.name;
+    final httpStr = 'http${useSSL ? 's' : ''}';
+    final endpoint =
+        '$httpStr://$bucket${Domain.fromStr(domain) == Domain.amazonaws ? '.s3' : ''}.$region.$domain.com';
 
     String? uploadKey;
 
@@ -74,8 +84,12 @@ class AwsS3 {
 
     final uri = Uri.parse(endpoint);
     final req = http.MultipartRequest("POST", uri);
-    final multipartFile =
-        http.MultipartFile('file', stream, length, filename: path.basename(file.path));
+    final multipartFile = http.MultipartFile(
+      'file',
+      stream,
+      length,
+      filename: path.basename(file.path),
+    );
 
     // Convert metadata to AWS-compliant params before generating the policy.
     final metadataParams = _convertMetadataToParams(metadata);
@@ -92,7 +106,12 @@ class AwsS3 {
       metadata: metadataParams,
     );
 
-    final signingKey = SigV4.calculateSigningKey(secretKey, policy.datetime, region, 's3');
+    final signingKey = SigV4.calculateSigningKey(
+      secretKey,
+      policy.datetime,
+      region,
+      's3',
+    );
     final signature = SigV4.calculateSignature(signingKey, policy.encode());
 
     req.files.add(multipartFile);
@@ -124,7 +143,9 @@ class AwsS3 {
 
   /// A method to transform the map keys into the format compliant with AWS.
   /// AWS requires that each metadata param be sent as `x-amz-meta-*`.
-  static Map<String, String> _convertMetadataToParams(Map<String, String>? metadata) {
+  static Map<String, String> _convertMetadataToParams(
+    Map<String, String>? metadata,
+  ) {
     Map<String, String> updatedMetadata = {};
 
     if (metadata != null) {
